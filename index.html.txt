@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Masinuta si Camera</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            position: relative;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+        }
+        .controls {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            padding: 0 50px;
+            box-sizing: border-box;
+        }
+        .buttons {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .buttons button {
+            font-size: 18px;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .buttons button:hover {
+            background-color: #0056b3;
+        }
+        .logout-button {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px 15px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            z-index: 3;
+        }
+        .logout-button:hover {
+            background-color: #0056b3;
+        }
+        .video-stream {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <img src="/video_feed" class="video-stream" alt="Video Stream">
+    <button class="logout-button" onclick="window.location.href='/logout'">Logout</button>
+    <div class="controls">
+        <div class="car-controls">
+            <div class="buttons">
+                <button id="forward">Inainte</button>
+                <button id="left">Stanga</button>
+                <button id="stop" style="background-color: #dc3545;">Stop</button>
+                <button id="right">Dreapta</button>
+                <button id="backward">Inapoi</button>
+                <button id="resetWires" style="background-color: #ffc107; color: black;">Reset Roti</button>
+            </div>
+        </div>
+        <div class="camera-controls">
+            <div class="buttons">
+                <button id="camUp">Sus</button>
+                <button id="camDown">Jos</button>
+                <button id="camLeft">Stanga</button>
+                <button id="camRight">Dreapta</button>
+                <button id="resetCam" style="background-color: #ffc107; color: black;">Reset Camera</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        var ngrokUrl = "{{ ngrok_url }}";
+ 
+        function sendCommand(endpoint) {
+            var xmlHttp = new XMLHttpRequest();
+            var url = ngrokUrl + "/action/" + endpoint;
+ 
+            xmlHttp.open("GET", url, true);
+            xmlHttp.onload = function() {
+                if (xmlHttp.status === 200) {
+                    console.log("Comanda trimisa catre Raspberry Pi: " + endpoint);
+                } else {
+                    console.error("Eroare la trimiterea comenzii: " + xmlHttp.statusText);
+                }
+            };
+            xmlHttp.onerror = function() {
+                console.error("Cererea nu a putut fi completata.");
+            };
+            xmlHttp.send(null);
+        }
+ 
+        const controlButtons = document.querySelectorAll('.buttons button');
+        controlButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                controlButtons.forEach(btn => btn.classList.remove('active'));
+                this.classList.add('active');
+                const command = this.id;
+                sendCommand(command);
+            });
+        });
+ 
+        document.addEventListener('keydown', function(event) {
+            let command;
+            switch(event.key) {
+                case 'w':
+                    command = 'forward';
+                    break;
+                case 'a':
+                    command = 'left';
+                    break;
+                case ' ':
+                    command = 'stop';
+                    break;
+                case 'd':
+                    command = 'right';
+                    break;
+                case 's':
+                    command = 'backward';
+                    break;
+                case 'r':
+                    command = 'resetWires';
+                    break;
+                case 'ArrowUp':
+                    command = 'camUp';
+                    break;
+                case 'ArrowDown':
+                    command = 'camDown';
+                    break;
+                case 'ArrowLeft':
+                    command = 'camLeft';
+                    break;
+                case 'ArrowRight':
+                    command = 'camRight';
+                    break;
+                case 'c':
+                    command = 'resetCam';
+                    break;
+                default:
+                    return; // Daca tasta apasata nu este relevanta, nu face nimic
+            }
+            sendCommand(command);
+        });
+    </script>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

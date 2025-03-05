@@ -1,0 +1,199 @@
+from flask import Flask, render_template, Response, redirect, url_for, request, flash
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user
+from pathlib import Path
+from adafruit_pca9685 import PCA9685
+import cv2
+import busio
+import board
+import RPi.GPIO as GPIO
+import requests
+import logging
+import os
+ 
+# Initializare logging
+logging.basicConfig(level=logging.DEBUG)
+ 
+# Initializare GPIO
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(17, GPIO.OUT)  # Pin 17 pentru MA
+GPIO.setup(27, GPIO.OUT)  # Pin 27 pentru MB
+ 
+app = Flask(__name__)
+app.secret_key = 'supersecretkey'
+login_manager = LoginManager()
+login_manager.init_app(app)
+ 
+class User(UserMixin):
+    def __init__(self, id):
+        self.id = id
+ 
+users = {'admin': {'password': 'password'}}
+ 
+# Initializeaza I2C si PCA9685
+i2c = busio.I2C(board.SCL, board.SDA)
+pca = PCA9685(i2c)
+pca.frequency = 50  # Frecventa pentru motoare
+ 
+# Initializeaza captura video
+camera = cv2.VideoCapture(0)  # 0 este indexul camerei USB, poate fi schimbat la alt index daca ai mai multe camere
+camera.set(cv2.CAP_PROP_FPS, 15)  # Seteaza FPS-ul la 15 pentru a reduce incarcarea
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, 352)
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 288)
+ 
+@login_manager.user_loader
+def load_user(user_id):
+    return User(user_id)
+ 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    try:
+        if request.method == 'POST':
+            username = request.form['username']
+            password = request.form['password']
+            if username in users and users[username]['password'] == password:
+                user = User(username)
+                login_user(user)
+                return redirect(url_for('index'))
+            else:
+                flash('Invalid username or password')
+                return redirect(url_for('login'))
+        return render_template('login.html')
+    except Exception as e:
+        logging.error("Error in login route: %s", e)
+        return 'Internal Server Error', 500
+ 
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+ 
+@app.route('/')
+def home():
+    return redirect(url_for('login'))
+ 
+@app.route('/index')
+@login_required
+def index():
+    try:
+        ngrok_url = get_ngrok_url()
+        return render_template('index.html', ngrok_url=ngrok_url)
+    except Exception as e:
+        logging.error("Error in index route: %s", e)
+        return 'Internal Server Error', 500
+ 
+def get_ngrok_url():
+    url = "http://127.0.0.1:4040/api/tunnels"
+    response = requests.get(url).json()
+    return response['tunnels'][0]['public_url']
+ 
+def gen_frames():
+    while camera.isOpened():
+        success, frame = camera.read()
+        if not success:
+            logging.error("Eroare la citirea cadrului de la camera!")
+            break
+        else:
+            try:
+                ret, buffer = cv2.imencode('.jpg', frame)
+                frame = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            except Exception as e:
+                logging.error("Eroare la procesarea cadrului: %s", e)
+    camera.release()
+ 
+@app.route('/video_feed')
+@login_required
+def video_feed():
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+ 
+def move_forward():
+    GPIO.output(27, GPIO.LOW)  # MB Low
+    GPIO.output(17, GPIO.LOW)  # MA Low
+    pca.channels[4].duty_cycle = 0x7FFF
+    pca.channels[5].duty_cycle = 0x7FFF
+ 
+def stop():
+    pca.channels[4].duty_cycle = 0x0000
+    pca.channels[5].duty_cycle = 0x0000
+ 
+def move_backward():
+    GPIO.output(27, GPIO.HIGH)  # MB High
+    GPIO.output(17, GPIO.HIGH)  # MA High
+    pca.channels[4].duty_cycle = 0x7FFF
+    pca.channels[5].duty_cycle = 0x7FFF
+ 
+def turn_left():
+    duty_cycle = int((1.2 / 20) * 65535)
+    pca.channels[0].duty_cycle = duty_cycle
+ 
+def turn_right():
+    duty_cycle = int((1.8 / 20) * 65535)
+    pca.channels[0].duty_cycle = duty_cycle
+ 
+def cam_left():
+    duty_cycle = int((1.7 / 20) * 65535)
+    pca.channels[1].duty_cycle = duty_cycle
+ 
+def cam_right():
+    duty_cycle = int((1.1 / 20) * 65535)
+    pca.channels[1].duty_cycle = duty_cycle
+ 
+def cam_up():
+    duty_cycle = int((1.7 / 20) * 65535)
+    pca.channels[2].duty_cycle = duty_cycle
+ 
+def cam_down():
+    duty_cycle = int((1.3 / 20) * 65535)
+    pca.channels[2].duty_cycle = duty_cycle
+ 
+def reset_camera():
+    # Seteaza servomotoarele la pozitia mediana (90 de grade)
+    pca.channels[1].duty_cycle = int((1.4 / 20) * 65535)
+    pca.channels[2].duty_cycle = int((1.5 / 20) * 65535)
+    logging.info("Camera a fost resetata la pozitia initiala.")
+ 
+def reset_wires():
+    # Seteaza servomotoarele la pozitia mediana (90 de grade)
+    pca.channels[0].duty_cycle = int((1.5 / 20) * 65535)
+    logging.info("Rotile au fost resetate la pozitia initiala.")
+ 
+@app.route('/action/<command>')
+@login_required
+def action(command):
+    try:
+        if command == "forward":
+            move_forward()
+        elif command == "stop":
+            stop()
+        elif command == "backward":
+            move_backward()
+        elif command == "left":
+            turn_left()
+        elif command == "right":
+            turn_right()
+        elif command == "camLeft":
+            cam_left()
+        elif command == "camRight":
+            cam_right()
+        elif command == "camUp":
+            cam_up()
+        elif command == "camDown":
+            cam_down()
+        elif command == "resetCam":
+            reset_camera()
+        elif command == "resetWires":
+            reset_wires()
+        else:
+            return f"Comanda necunoscuta: {command}", 400
+ 
+        logging.info(f"Comanda primita: {command}")
+        return f"Execut comanda: {command}"
+ 
+    except Exception as e:
+        logging.error("Eroare la procesarea comenzii %s: %s", command, e)
+        return f"Eroare la procesarea comenzii: {e}", 500
+ 
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=8000, debug=False)
